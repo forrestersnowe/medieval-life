@@ -1,0 +1,274 @@
+# file: medieval_life_sim/main.py
+
+import json
+import random
+import os
+from dataclasses import dataclass, field
+
+
+# --- Character ---------------------------------------------------------------
+
+@dataclass
+class Character:
+    name: str
+    background: str
+    age: int = 16
+    health: int = 100
+    wealth: int = 0
+    reputation: int = 0
+    combat: int = 1
+    literacy: int = 0
+    diplomacy: int = 0
+    relationships: dict = field(default_factory=dict)
+
+    def is_alive(self) -> bool:
+        return self.health > 0
+
+    def to_dict(self):
+        return self.__dict__
+
+    @staticmethod
+    def from_dict(data):
+        return Character(**data)
+
+
+# --- Event Engine ------------------------------------------------------------
+
+class EventEngine:
+    def __init__(self):
+        self.events = [
+            self.plague,
+            self.bandits,
+            self.tax,
+            self.love_event,
+            self.meet_random_person,
+        ]
+
+    def trigger(self, c: Character):
+        if random.random() < 0.35:
+            return random.choice(self.events)(c)
+        return "The year passes quietly."
+
+    def plague(self, c):
+        loss = random.randint(5, 20)
+        c.health -= loss
+        return f"Plague spreads. You lose {loss} health."
+
+    def bandits(self, c):
+        if c.combat >= 5:
+            gain = random.randint(5, 20)
+            c.wealth += gain
+            return f"You defeat bandits and gain {gain} gold."
+        loss = random.randint(5, 25)
+        c.wealth = max(0, c.wealth - loss)
+        c.health -= random.randint(0, 10)
+        return f"Bandits rob you of {loss} gold."
+
+    def tax(self, c):
+        cost = random.randint(3, 10)
+        c.wealth = max(0, c.wealth - cost)
+        return f"You pay {cost} gold in extra taxes."
+
+    def love_event(self, c):
+        rep = random.randint(3, 10)
+        c.reputation += rep
+        return f"You meet someone charming. Reputation +{rep}."
+
+    def meet_random_person(self, c):
+        name = random.choice(["Aldric", "Elara", "Cedric", "Marion", "Rowan"])
+        if name not in c.relationships:
+            c.relationships[name] = random.randint(5, 20)
+            return f"You meet {name}. Relationship started."
+        gain = random.randint(1, 6)
+        c.relationships[name] += gain
+        return f"You spend time with {name}. Relationship +{gain}."
+
+
+# --- Game --------------------------------------------------------------------
+
+class Game:
+    SAVE_DIR = "saves"
+
+    def __init__(self):
+        os.makedirs(self.SAVE_DIR, exist_ok=True)
+        self.c = None
+        self.events = EventEngine()
+
+    # --- Menu ----------------------------------------------------------------
+    def start(self):
+        print("1. Start New Game")
+        print("2. Load Game")
+
+        choice = input("Select: ")
+
+        if choice == "2":
+            self.load_game()
+        else:
+            self.create_character()
+
+        self.loop()
+
+    # --- Save / Load ---------------------------------------------------------
+    def save_game(self):
+        path = os.path.join(self.SAVE_DIR, f"{self.c.name}.json")
+        with open(path, "w") as f:
+            json.dump(self.c.to_dict(), f)
+        print("Game saved.")
+
+    def load_game(self):
+        files = os.listdir(self.SAVE_DIR)
+        if not files:
+            print("No saves found. Starting new game.")
+            return self.create_character()
+
+        print("Available saves:")
+        for i, f in enumerate(files, 1):
+            print(f"{i}. {f}")
+
+        idx = int(input("Which save? ")) - 1
+        file = files[idx]
+
+        with open(os.path.join(self.SAVE_DIR, file)) as f:
+            data = json.load(f)
+
+        self.c = Character.from_dict(data)
+        print(f"Loaded {self.c.name}.")
+
+    # --- Character Creation --------------------------------------------------
+    def create_character(self):
+        name = input("Enter your character's name: ")
+
+        print("\nChoose background:")
+        options = {
+            "1": ("Peasant", {"wealth": 3}),
+            "2": ("Merchant", {"wealth": 20, "literacy": 1}),
+            "3": ("Noble", {"wealth": 30, "diplomacy": 2}),
+            "4": ("Cleric", {"literacy": 3}),
+            "5": ("Soldier", {"combat": 3}),
+        }
+
+        for k, (bg, _) in options.items():
+            print(f"{k}. {bg}")
+
+        choice = input("Select: ").strip()
+        bg, stats = options.get(choice, ("Peasant", {}))
+
+        c = Character(name=name, background=bg)
+        for k, v in stats.items():
+            setattr(c, k, v)
+
+        self.c = c
+        print(f"\nYou begin life as a {bg}.\n")
+
+    # --- Loop ----------------------------------------------------------------
+    def loop(self):
+        while self.c.is_alive():
+            self.show_status()
+            self.choose_action()
+            print(self.events.trigger(self.c))
+            self.c.age += 1
+            print("---")
+
+        print(f"⚰️ {self.c.name} has died at age {self.c.age}.")
+
+    # --- Status --------------------------------------------------------------
+    def show_status(self):
+        c = self.c
+        print(
+            f"\nYear {c.age}\n"
+            f"Health: {c.health}\n"
+            f"Wealth: {c.wealth}\n"
+            f"Reputation: {c.reputation}\n"
+        )
+
+    # --- Actions -------------------------------------------------------------
+    def choose_action(self):
+        print("1. Work")
+        print("2. Train Skill")
+        print("3. Socialize")
+        print("4. Adventure")
+        print("5. Relationships")
+        print("6. Save Game")
+
+        choice = input("Choose: ")
+
+        if choice == "1":
+            self.work()
+        elif choice == "2":
+            self.train()
+        elif choice == "3":
+            self.socialize()
+        elif choice == "4":
+            self.adventure()
+        elif choice == "5":
+            self.relationship_menu()
+        elif choice == "6":
+            self.save_game()
+
+    # --- Work ---------------------------------------------------------------
+    def work(self):
+        pay = {
+            "Peasant": 3,
+            "Merchant": 8,
+            "Noble": 5,
+            "Cleric": 4,
+            "Soldier": 6,
+        }.get(self.c.background, 2)
+        self.c.wealth += pay
+
+    # --- Train --------------------------------------------------------------
+    def train(self):
+        print("1. Combat  2. Literacy  3. Diplomacy")
+        choice = input("Select: ")
+
+        if choice == "1":
+            self.c.combat += 1
+        elif choice == "2":
+            self.c.literacy += 1
+        elif choice == "3":
+            self.c.diplomacy += 1
+
+    # --- Socialize ----------------------------------------------------------
+    def socialize(self):
+        gain = random.randint(1, 5)
+        self.c.reputation += gain
+
+    # --- Adventure -----------------------------------------------------------
+    def adventure(self):
+        if random.random() < 0.4:
+            loot = random.randint(5, 20)
+            self.c.wealth += loot
+        else:
+            dmg = random.randint(5, 30)
+            self.c.health -= dmg
+
+    # --- Relationships -------------------------------------------------------
+    def relationship_menu(self):
+        if not self.c.relationships:
+            print("You know no one.")
+            return
+
+        print("\nPeople you know:")
+        for name, val in self.c.relationships.items():
+            print(f"- {name}: {val}")
+
+        print("\n1. Improve Relationship")
+        print("2. Marriage Attempt")
+
+        choice = input("Select: ")
+
+        if choice == "1":
+            target = input("Name: ")
+            if target in self.c.relationships:
+                self.c.relationships[target] += random.randint(3, 10)
+        elif choice == "2":
+            target = input("Name: ")
+            if target in self.c.relationships and self.c.relationships[target] >= 60:
+                print(f"You marry {target}!")
+                self.c.reputation += 10
+            else:
+                print("They refuse.")
+
+
+if __name__ == "__main__":
+    Game().start()
